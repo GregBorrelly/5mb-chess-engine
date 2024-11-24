@@ -1,4 +1,3 @@
-// MinimalChessEngine.js
 class MinimalChessEngine {
   constructor() {
     // Board representation
@@ -12,41 +11,43 @@ class MinimalChessEngine {
     this.bishopOffsets = [-9, -7, 7, 9];
     this.rookOffsets = [-8, -1, 1, 8];
 
-    // Piece values
+    // Enhanced piece values
     this.pieceValues = new Int16Array([0, 100, 320, 330, 500, 900, 20000]);
 
-    // Initialize position
+    // Piece-square tables for improved positional play
+    this.pawnTable = new Int8Array([
+      0, 0, 0, 0, 0, 0, 0, 0, 50, 50, 50, 50, 50, 50, 50, 50, 10, 10, 20, 30,
+      30, 20, 10, 10, 5, 5, 10, 25, 25, 10, 5, 5, 0, 0, 0, 20, 20, 0, 0, 0, 5,
+      -5, -10, 0, 0, -10, -5, 5, 5, 10, 10, -20, -20, 10, 10, 5, 0, 0, 0, 0, 0,
+      0, 0, 0,
+    ]);
+
+    // Initialize transposition table
+    this.transpositionTable = new Map();
+
     this.setupInitialPosition();
   }
 
   setupInitialPosition() {
-    // Clear board
     this.board.fill(0);
-
-    // Set pawns
     for (let i = 0; i < 8; i++) {
-      this.board[8 + i] = 1; // Black pawns (1)
-      this.board[48 + i] = 9; // White pawns (9 = 1 + 8)
+      this.board[8 + i] = 1;
+      this.board[48 + i] = 9;
     }
-
-    // Set pieces in order: Rook(4), Knight(2), Bishop(3), Queen(5), King(6)
     const backRank = [4, 2, 3, 5, 6, 3, 2, 4];
     for (let i = 0; i < 8; i++) {
-      this.board[i] = backRank[i]; // Black pieces
-      this.board[i + 56] = backRank[i] + 8; // White pieces (+8 for white)
+      this.board[i] = backRank[i];
+      this.board[i + 56] = backRank[i] + 8;
     }
-
     this.historyCount = 0;
   }
 
   isWhite(piece) {
     return piece >= 8;
   }
-
   getPieceType(piece) {
     return piece & 7;
   }
-
   isValidSquare(square) {
     return square >= 0 && square < 64;
   }
@@ -54,11 +55,7 @@ class MinimalChessEngine {
   makeMove(move) {
     const { from, to } = this.decodeMove(move);
     const captured = this.board[to];
-
-    // Save move in history with captured piece
     this.moveHistory[this.historyCount++] = from | (to << 6) | (captured << 12);
-
-    // Move piece
     this.board[to] = this.board[from];
     this.board[from] = 0;
   }
@@ -68,10 +65,155 @@ class MinimalChessEngine {
     const from = move & 0x3f;
     const to = (move >> 6) & 0x3f;
     const captured = move >> 12;
-
-    // Restore position
     this.board[from] = this.board[to];
     this.board[to] = captured;
+  }
+
+  evaluate() {
+    let score = 0;
+    let endgame = this.isEndgame();
+
+    for (let square = 0; square < 64; square++) {
+      const piece = this.board[square];
+      if (!piece) continue;
+
+      const pieceType = this.getPieceType(piece);
+      const isWhitePiece = this.isWhite(piece);
+      let value = this.pieceValues[pieceType];
+
+      // Position value based on piece-square tables
+      const rank = Math.floor(square / 8);
+      const file = square % 8;
+
+      // Pawn structure evaluation
+      if (pieceType === 1) {
+        value += isWhitePiece
+          ? this.pawnTable[square]
+          : this.pawnTable[63 - square];
+
+        // Doubled pawns penalty
+        let doubledPawns = 0;
+        for (let r = 0; r < 8; r++) {
+          if (this.board[file + r * 8] === piece) doubledPawns++;
+        }
+        if (doubledPawns > 1) value -= 20;
+      }
+
+      // Mobility bonus
+      if (pieceType > 1) {
+        const mobility = Array.from(this.generateMoves()).length;
+        value += mobility * 2;
+      }
+
+      score += isWhitePiece ? value : -value;
+    }
+
+    return this.historyCount % 2 === 0 ? score : -score;
+  }
+
+  isEndgame() {
+    let queens = 0;
+    let minors = 0;
+    for (let square = 0; square < 64; square++) {
+      const piece = this.getPieceType(this.board[square]);
+      if (piece === 5) queens++;
+      if (piece === 2 || piece === 3) minors++;
+    }
+    return queens === 0 || (queens === 2 && minors <= 2);
+  }
+
+  search(depth, alpha, beta) {
+    // Transposition table lookup
+    const ttEntry = this.transpositionTable.get(this.zobristHash());
+    if (ttEntry && ttEntry.depth >= depth) {
+      return ttEntry.score;
+    }
+
+    if (depth === 0) {
+      return this.quiescenceSearch(alpha, beta);
+    }
+
+    const moves = Array.from(this.generateMoves());
+    if (moves.length === 0) return -20000;
+
+    // Move ordering
+    moves.sort((a, b) => this.getMoveScore(b) - this.getMoveScore(a));
+
+    let bestScore = -Infinity;
+    for (const move of moves) {
+      this.makeMove(move);
+      const score = -this.search(depth - 1, -beta, -alpha);
+      this.unmakeMove();
+
+      if (score >= beta) {
+        return beta;
+      }
+      bestScore = Math.max(bestScore, score);
+      alpha = Math.max(alpha, score);
+    }
+
+    // Store position in transposition table
+    this.transpositionTable.set(this.zobristHash(), {
+      score: bestScore,
+      depth: depth,
+    });
+
+    return bestScore;
+  }
+
+  quiescenceSearch(alpha, beta) {
+    const standPat = this.evaluate();
+    if (standPat >= beta) return beta;
+    if (standPat > alpha) alpha = standPat;
+
+    const captures = Array.from(this.generateCaptures());
+    for (const move of captures) {
+      this.makeMove(move);
+      const score = -this.quiescenceSearch(-beta, -alpha);
+      this.unmakeMove();
+
+      if (score >= beta) return beta;
+      if (score > alpha) alpha = score;
+    }
+    return alpha;
+  }
+
+  *generateCaptures() {
+    for (const move of this.generateMoves()) {
+      const { to } = this.decodeMove(move);
+      if (this.board[to] !== 0) {
+        yield move;
+      }
+    }
+  }
+
+  getMoveScore(move) {
+    const { to, captured } = this.decodeMove(move);
+    let score = 0;
+
+    // Capture scoring
+    if (captured) {
+      score += 10 * this.pieceValues[this.getPieceType(captured)];
+    }
+
+    // Center control
+    const toRank = Math.floor(to / 8);
+    const toFile = to % 8;
+    if (toRank >= 3 && toRank <= 4 && toFile >= 3 && toFile <= 4) {
+      score += 30;
+    }
+
+    return score;
+  }
+
+  zobristHash() {
+    let hash = 0;
+    for (let i = 0; i < 64; i++) {
+      if (this.board[i]) {
+        hash ^= (this.board[i] * 31 + i) * 7937;
+      }
+    }
+    return hash;
   }
 
   *generatePawnMoves(square) {
