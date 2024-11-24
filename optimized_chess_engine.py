@@ -1,245 +1,300 @@
-import chess
-import time
-from typing import Optional, Tuple
+// MinimalChessEngine.js
 
-class EnhancedChessEngine:
-    # Piece-Square Tables for positional evaluation
-    PAWN_TABLE = [
-        0,  0,  0,  0,  0,  0,  0,  0,
-        50, 50, 50, 50, 50, 50, 50, 50,
-        10, 10, 20, 30, 30, 20, 10, 10,
-        5,  5, 10, 25, 25, 10,  5,  5,
-        0,  0,  0, 20, 20,  0,  0,  0,
-        5, -5,-10,  0,  0,-10, -5,  5,
-        5, 10, 10,-20,-20, 10, 10,  5,
-        0,  0,  0,  0,  0,  0,  0,  0
-    ]
-
-    KNIGHT_TABLE = [
-        -50,-40,-30,-30,-30,-30,-40,-50,
-        -40,-20,  0,  0,  0,  0,-20,-40,
-        -30,  0, 10, 15, 15, 10,  0,-30,
-        -30,  5, 15, 20, 20, 15,  5,-30,
-        -30,  0, 15, 20, 20, 15,  0,-30,
-        -30,  5, 10, 15, 15, 10,  5,-30,
-        -40,-20,  0,  5,  5,  0,-20,-40,
-        -50,-40,-30,-30,-30,-30,-40,-50
-    ]
-
-    def __init__(self, depth: int = 4):
-        self.board = chess.Board()
-        self.max_depth = depth
-        self.nodes_evaluated = 0
-        self.transposition_table = {}
-        self.start_time = 0
-        self.time_limit = 9.8  # Leave 0.2s buffer for move transmission
+class MinimalChessEngine {
+    constructor() {
+        // Board representation: 0-63, piece values: PNBRQK = 1-6, color: +8 for white
+        this.board = new Int8Array(64);
+        this.moveHistory = new Int32Array(1024);
+        this.historyCount = 0;
         
-        # Material values with additional precision
-        self.piece_values = {
-            chess.PAWN: 100,
-            chess.KNIGHT: 320,
-            chess.BISHOP: 330,
-            chess.ROOK: 500,
-            chess.QUEEN: 900,
-            chess.KING: 20000
+        // Piece values and tables
+        this.pieceValues = new Int16Array([0, 100, 320, 330, 500, 900, 20000]);
+        
+        // Movement patterns
+        this.knightMoves = [-17, -15, -10, -6, 6, 10, 15, 17];
+        this.kingMoves = [-9, -8, -7, -1, 1, 7, 8, 9];
+        this.bishopDirs = [-9, -7, 7, 9];
+        this.rookDirs = [-8, -1, 1, 8];
+        
+        // Center squares for positional evaluation
+        this.centerSquares = new Set([27, 28, 35, 36]);
+        
+        this.setupBoard();
+    }
+
+    setupBoard() {
+        // Clear the board
+        this.board.fill(0);
+        
+        // Set up pawns
+        for (let i = 0; i < 8; i++) {
+            this.board[8 + i] = 1;      // Black pawns
+            this.board[48 + i] = 1 + 8;  // White pawns
+        }
+        
+        // Set up pieces (RNBQKBNR)
+        const backRank = [4, 2, 3, 5, 6, 3, 2, 4];
+        for (let i = 0; i < 8; i++) {
+            this.board[i] = backRank[i];          // Black pieces
+            this.board[56 + i] = backRank[i] + 8; // White pieces
+        }
+    }
+
+    isWhite(piece) {
+        return piece >= 8;
+    }
+
+    getPieceType(piece) {
+        return piece & 7;
+    }
+
+    isValidSquare(square) {
+        return square >= 0 && square < 64;
+    }
+
+    *generateMoves() {
+        const isWhiteTurn = (this.historyCount % 2) === 0;
+        
+        for (let square = 0; square < 64; square++) {
+            const piece = this.board[square];
+            if (!piece || this.isWhite(piece) !== isWhiteTurn) continue;
+            
+            const pieceType = this.getPieceType(piece);
+            switch (pieceType) {
+                case 1: // Pawn
+                    yield* this.generatePawnMoves(square);
+                    break;
+                case 2: // Knight
+                    yield* this.generateKnightMoves(square);
+                    break;
+                case 3: // Bishop
+                    yield* this.generateSlidingMoves(square, this.bishopDirs);
+                    break;
+                case 4: // Rook
+                    yield* this.generateSlidingMoves(square, this.rookDirs);
+                    break;
+                case 5: // Queen
+                    yield* this.generateSlidingMoves(square, [...this.bishopDirs, ...this.rookDirs]);
+                    break;
+                case 6: // King
+                    yield* this.generateKingMoves(square);
+                    break;
+            }
+        }
+    }
+
+    *generatePawnMoves(square) {
+        const piece = this.board[square];
+        const isWhite = this.isWhite(piece);
+        const direction = isWhite ? -8 : 8;
+        const startRank = isWhite ? 6 : 1;
+        
+        // Forward move
+        let dest = square + direction;
+        if (this.isValidSquare(dest) && !this.board[dest]) {
+            yield this.encodeMove(square, dest);
+            
+            // Double move from start
+            if (Math.floor(square / 8) === startRank) {
+                dest = square + 2 * direction;
+                if (!this.board[dest]) {
+                    yield this.encodeMove(square, dest);
+                }
+            }
+        }
+        
+        // Captures
+        for (const offset of [direction - 1, direction + 1]) {
+            dest = square + offset;
+            if (!this.isValidSquare(dest)) continue;
+            
+            // Check if diagonal move is valid
+            const srcFile = square % 8;
+            const destFile = dest % 8;
+            if (Math.abs(destFile - srcFile) !== 1) continue;
+            
+            const target = this.board[dest];
+            if (target && this.isWhite(target) !== isWhite) {
+                yield this.encodeMove(square, dest);
+            }
+        }
+    }
+
+    *generateKnightMoves(square) {
+        const piece = this.board[square];
+        for (const offset of this.knightMoves) {
+            const dest = square + offset;
+            if (!this.isValidSquare(dest)) continue;
+            
+            // Verify knight's L-shape movement
+            const srcRank = Math.floor(square / 8);
+            const srcFile = square % 8;
+            const destRank = Math.floor(dest / 8);
+            const destFile = dest % 8;
+            
+            if (Math.abs(destRank - srcRank) + Math.abs(destFile - srcFile) !== 3) continue;
+            
+            const target = this.board[dest];
+            if (!target || this.isWhite(target) !== this.isWhite(piece)) {
+                yield this.encodeMove(square, dest);
+            }
+        }
+    }
+
+    *generateKingMoves(square) {
+        const piece = this.board[square];
+        for (const offset of this.kingMoves) {
+            const dest = square + offset;
+            if (!this.isValidSquare(dest)) continue;
+            
+            // Verify one square movement
+            const srcRank = Math.floor(square / 8);
+            const srcFile = square % 8;
+            const destRank = Math.floor(dest / 8);
+            const destFile = dest % 8;
+            
+            if (Math.abs(destRank - srcRank) > 1 || Math.abs(destFile - srcFile) > 1) continue;
+            
+            const target = this.board[dest];
+            if (!target || this.isWhite(target) !== this.isWhite(piece)) {
+                yield this.encodeMove(square, dest);
+            }
+        }
+    }
+
+    *generateSlidingMoves(square, directions) {
+        const piece = this.board[square];
+        for (const dir of directions) {
+            let dest = square + dir;
+            
+            while (this.isValidSquare(dest)) {
+                const srcRank = Math.floor(square / 8);
+                const srcFile = square % 8;
+                const destRank = Math.floor(dest / 8);
+                const destFile = dest % 8;
+                
+                // Check if we've wrapped around the board
+                if (Math.abs(destRank - srcRank) > 7 || Math.abs(destFile - srcFile) > 7) break;
+                
+                const target = this.board[dest];
+                if (!target) {
+                    yield this.encodeMove(square, dest);
+                } else {
+                    if (this.isWhite(target) !== this.isWhite(piece)) {
+                        yield this.encodeMove(square, dest);
+                    }
+                    break;
+                }
+                dest += dir;
+            }
+        }
+    }
+
+    encodeMove(from, to) {
+        return (from) | (to << 6) | (this.board[to] << 12);
+    }
+
+    decodeMove(move) {
+        return {
+            from: move & 0x3F,
+            to: (move >> 6) & 0x3F,
+            captured: move >> 12
+        };
+    }
+
+    makeMove(move) {
+        const { from, to } = this.decodeMove(move);
+        this.moveHistory[this.historyCount++] = move;
+        this.board[to] = this.board[from];
+        this.board[from] = 0;
+    }
+
+    unmakeMove() {
+        const move = this.moveHistory[--this.historyCount];
+        const { from, to, captured } = this.decodeMove(move);
+        this.board[from] = this.board[to];
+        this.board[to] = captured;
+    }
+
+    evaluate() {
+        let score = 0;
+        
+        for (let square = 0; square < 64; square++) {
+            const piece = this.board[square];
+            if (!piece) continue;
+            
+            // Base piece value
+            let value = this.pieceValues[this.getPieceType(piece)];
+            
+            // Position bonus
+            if (this.centerSquares.has(square)) {
+                value += 20;
+            }
+            
+            // Add or subtract based on color
+            score += this.isWhite(piece) ? value : -value;
+        }
+        
+        return (this.historyCount % 2 === 0) ? score : -score;
+    }
+
+    search(depth, alpha, beta) {
+        if (depth === 0) {
+            return this.evaluate();
         }
 
-    def evaluate_position(self) -> int:
-        """Enhanced position evaluation with multiple components."""
-        if self.board.is_checkmate():
-            return -20000 if self.board.turn else 20000
-        if self.board.is_stalemate() or self.board.is_insufficient_material():
-            return 0
+        let bestScore = -Infinity;
 
-        score = self.evaluate_material()
-        score += self.evaluate_piece_position()
-        score += self.evaluate_mobility()
-        score += self.evaluate_pawn_structure()
-        
-        return score if self.board.turn else -score
+        for (const move of this.generateMoves()) {
+            this.makeMove(move);
+            const score = -this.search(depth - 1, -beta, -alpha);
+            this.unmakeMove();
 
-    def evaluate_material(self) -> int:
-        """Evaluate material balance with specialized piece values."""
-        score = 0
-        for piece_type in self.piece_values:
-            score += (len(self.board.pieces(piece_type, chess.WHITE)) - 
-                     len(self.board.pieces(piece_type, chess.BLACK))) * self.piece_values[piece_type]
-        return score
+            if (score >= beta) {
+                return beta;
+            }
+            if (score > bestScore) {
+                bestScore = score;
+                alpha = Math.max(alpha, score);
+            }
+        }
 
-    def evaluate_piece_position(self) -> int:
-        """Evaluate piece positioning using piece-square tables."""
-        score = 0
-        for square in chess.SQUARES:
-            piece = self.board.piece_at(square)
-            if not piece:
-                continue
+        return bestScore;
+    }
+
+    getBestMove() {
+        const startTime = Date.now();
+        let bestMove = null;
+        let bestScore = -Infinity;
+
+        for (let depth = 1; depth <= 4; depth++) {
+            if (Date.now() - startTime > 9800) break;
             
-            # Flip square index for black pieces
-            adjusted_square = square if piece.color else square ^ 56
+            for (const move of this.generateMoves()) {
+                this.makeMove(move);
+                const score = -this.search(depth - 1, -Infinity, Infinity);
+                this.unmakeMove();
+
+                if (score > bestScore) {
+                    bestScore = score;
+                    bestMove = move;
+                }
+            }
             
-            if piece.piece_type == chess.PAWN:
-                score += self.PAWN_TABLE[adjusted_square] if piece.color else -self.PAWN_TABLE[adjusted_square]
-            elif piece.piece_type == chess.KNIGHT:
-                score += self.KNIGHT_TABLE[adjusted_square] if piece.color else -self.KNIGHT_TABLE[adjusted_square]
-        
-        return score
+            // Print progress
+            console.log(`Depth ${depth}: score=${bestScore/100}, move=${this.moveToString(bestMove)}`);
+        }
 
-    def evaluate_mobility(self) -> int:
-        """Evaluate piece mobility and control of the center."""
-        mobility = len(list(self.board.legal_moves))
-        self.board.turn = not self.board.turn
-        opponent_mobility = len(list(self.board.legal_moves))
-        self.board.turn = not self.board.turn
-        
-        return (mobility - opponent_mobility) * 10
+        return bestMove;
+    }
 
-    def evaluate_pawn_structure(self) -> int:
-        """Evaluate pawn structure including doubled and isolated pawns."""
-        score = 0
-        
-        # Create masks for each file to detect pawns
-        for file in range(8):
-            # Create file mask
-            file_mask = chess.BB_FILES[file]
-            
-            # Count pawns on the file
-            white_pawns = bin(self.board.pieces(chess.PAWN, chess.WHITE) & file_mask).count('1')
-            black_pawns = bin(self.board.pieces(chess.PAWN, chess.BLACK) & file_mask).count('1')
-            
-            # Penalize doubled pawns
-            if white_pawns > 1:
-                score -= 30
-            if black_pawns > 1:
-                score += 30
-            
-            # Check for isolated pawns
-            if white_pawns > 0:
-                isolated = True
-                for adjacent_file in [file - 1, file + 1]:
-                    if 0 <= adjacent_file < 8:
-                        adjacent_mask = chess.BB_FILES[adjacent_file]
-                        if self.board.pieces(chess.PAWN, chess.WHITE) & adjacent_mask:
-                            isolated = False
-                            break
-                if isolated:
-                    score -= 20
-            
-            if black_pawns > 0:
-                isolated = True
-                for adjacent_file in [file - 1, file + 1]:
-                    if 0 <= adjacent_file < 8:
-                        adjacent_mask = chess.BB_FILES[adjacent_file]
-                        if self.board.pieces(chess.PAWN, chess.BLACK) & adjacent_mask:
-                            isolated = False
-                            break
-                if isolated:
-                    score += 20
-        
-        return score
+    moveToString(move) {
+        if (!move) return "null";
+        const { from, to } = this.decodeMove(move);
+        const files = 'abcdefgh';
+        const ranks = '87654321';
+        return `${files[from % 8]}${ranks[Math.floor(from / 8)]}${files[to % 8]}${ranks[Math.floor(to / 8)]}`;
+    }
+}
 
-    def get_move_ordering(self, moves):
-        """Order moves to improve alpha-beta pruning efficiency."""
-        move_scores = []
-        for move in moves:
-            score = 0
-            moving_piece = self.board.piece_at(move.from_square)
-            captured_piece = self.board.piece_at(move.to_square)
-            
-            # Prioritize captures by MVV-LVA (Most Valuable Victim - Least Valuable Aggressor)
-            if captured_piece:
-                score = 10 * self.piece_values[captured_piece.piece_type] - self.piece_values[moving_piece.piece_type]
-            
-            # Prioritize promotions
-            if move.promotion:
-                score += self.piece_values[move.promotion]
-            
-            # Bonus for checks
-            self.board.push(move)
-            if self.board.is_check():
-                score += 50
-            self.board.pop()
-            
-            move_scores.append((move, score))
-        
-        return [move for move, _ in sorted(move_scores, key=lambda x: x[1], reverse=True)]
-
-    def negamax(self, depth: int, alpha: int, beta: int, color: int) -> Tuple[int, Optional[chess.Move]]:
-        """Negamax search with alpha-beta pruning and time management."""
-        # Check time limit
-        if time.time() - self.start_time > self.time_limit:
-            return float('-inf'), None
-
-        # Transposition table lookup
-        alpha_orig = alpha
-        tt_entry = self.transposition_table.get(self.board.fen())
-        if tt_entry and tt_entry[1] >= depth:
-            if tt_entry[2] == 0:  # Exact score
-                return tt_entry[0], None
-            elif tt_entry[2] == 1:  # Lower bound
-                alpha = max(alpha, tt_entry[0])
-            else:  # Upper bound
-                beta = min(beta, tt_entry[0])
-            if alpha >= beta:
-                return tt_entry[0], None
-
-        if depth == 0 or self.board.is_game_over():
-            return color * self.evaluate_position(), None
-
-        best_score = float('-inf')
-        best_move = None
-        moves = self.get_move_ordering(self.board.legal_moves)
-        
-        for move in moves:
-            self.board.push(move)
-            score, _ = self.negamax(depth - 1, -beta, -alpha, -color)
-            score = -score
-            self.board.pop()
-            
-            if score > best_score:
-                best_score = score
-                best_move = move
-                alpha = max(alpha, score)
-                if alpha >= beta:
-                    break
-
-        # Store position in transposition table
-        if best_score <= alpha_orig:
-            flag = 2  # Upper bound
-        elif best_score >= beta:
-            flag = 1  # Lower bound
-        else:
-            flag = 0  # Exact score
-        self.transposition_table[self.board.fen()] = (best_score, depth, flag)
-
-        return best_score, best_move
-
-    def get_best_move(self) -> Optional[chess.Move]:
-        """Iterative deepening with time management."""
-        self.start_time = time.time()
-        best_move = None
-        
-        # Iterative deepening
-        for depth in range(1, self.max_depth + 1):
-            try:
-                _, move = self.negamax(depth, float('-inf'), float('inf'), 1)
-                if move:
-                    best_move = move
-            except TimeoutError:
-                break
-            
-            # Check if we're running out of time
-            if time.time() - self.start_time > self.time_limit:
-                break
-        
-        return best_move
-
-    def make_move(self) -> Optional[chess.Move]:
-        """Make the best move on the board."""
-        move = self.get_best_move()
-        if move:
-            self.board.push(move)
-        return move
-
-def create_engine():
-    """Factory function to create engine instance for competition."""
-    return EnhancedChessEngine(depth=6)
+module.exports = { MinimalChessEngine };

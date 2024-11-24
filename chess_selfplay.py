@@ -7,7 +7,7 @@ from typing import List, Tuple
 class ChessGameAnalyzer:
     def __init__(self, engine_class):
         self.engine_class = engine_class
-        self.game_history: List[Tuple[chess.Board, float, str]] = []  # [(board, eval, move)]
+        self.game_history: List[Tuple[chess.Board, float, str]] = []
         
     def play_game(self, max_moves: int = 200) -> chess.pgn.Game:
         """Play a complete game and return it in PGN format."""
@@ -75,7 +75,7 @@ class ChessGameAnalyzer:
            board.is_fifty_moves() or board.is_repetition(3):
             return "1/2-1/2"
         return "*"
-    
+
     def analyze_game(self, game: chess.pgn.Game) -> dict:
         """Analyze the completed game and return statistics."""
         stats = {
@@ -84,8 +84,7 @@ class ChessGameAnalyzer:
             "checks": 0,
             "max_eval": float("-inf"),
             "min_eval": float("inf"),
-            "avg_eval": 0,
-            "material_imbalance": []
+            "avg_eval": 0
         }
         
         total_eval = 0
@@ -105,38 +104,19 @@ class ChessGameAnalyzer:
             stats["min_eval"] = min(stats["min_eval"], eval_score)
             total_eval += eval_score
             
-            # Track material balance
-            material_diff = self.count_material(board)
-            stats["material_imbalance"].append(material_diff)
-            
             prev_board = board.copy()
         
-        stats["avg_eval"] = total_eval / len(self.game_history)
+        if self.game_history:
+            stats["avg_eval"] = total_eval / len(self.game_history)
         
         return stats
-    
-    def count_material(self, board: chess.Board) -> int:
-        """Count material difference (positive for white advantage)."""
-        piece_values = {
-            chess.PAWN: 1,
-            chess.KNIGHT: 3,
-            chess.BISHOP: 3,
-            chess.ROOK: 5,
-            chess.QUEEN: 9
-        }
-        
-        material = 0
-        for piece_type in piece_values:
-            material += len(board.pieces(piece_type, chess.WHITE)) * piece_values[piece_type]
-            material -= len(board.pieces(piece_type, chess.BLACK)) * piece_values[piece_type]
-        return material
 
 def main():
     """Run multiple self-play games and analyze them."""
-    from optimized_chess_engine import EnhancedChessEngine  # Import your engine class
+    from optimized_chess_engine import CompactChessEngine  # Updated import
     
     num_games = 3
-    analyzer = ChessGameAnalyzer(EnhancedChessEngine)
+    analyzer = ChessGameAnalyzer(CompactChessEngine)
     
     print(f"Starting {num_games} self-play games...")
     
