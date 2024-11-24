@@ -10,8 +10,8 @@ class MinimalChessEngine {
     this.bishopOffsets = [-9, -7, 7, 9];
     this.rookOffsets = [-8, -1, 1, 8];
 
-    // Simplified piece values for memory efficiency
-    this.pieceValues = [0, 100, 320, 330, 500, 900, 20000];
+    // Modified piece values for increased dynamic play
+    this.pieceValues = [0, 100, 330, 350, 550, 1000, 25000];
 
     // Piece-square tables for improved positional play
     this.pawnTable = new Int8Array([
@@ -90,14 +90,65 @@ class MinimalChessEngine {
       // Add positional value for piece activity and king safety
       if (pieceType === 6) {
         value += this.isWhite(piece)
-          ? -Math.abs(4 - (square % 8))
-          : -Math.abs(4 - (square % 8));
+          ? -Math.abs(4 - (square % 8)) * 5
+          : -Math.abs(4 - (square % 8)) * 5;
+      }
+
+      // King safety: increased penalty for lack of nearby defenders
+      if (pieceType === 6) {
+        value -= this.countNearbyDefenders(square, piece) * 20;
+      }
+
+      // Pawn structure: bonus for connected pawns, penalty for isolated pawns
+      if (pieceType === 1) {
+        value += this.evaluatePawnStructure(square, piece);
+      }
+
+      // Central control: increased bonus for controlling central squares
+      if ([1, 2, 3, 4, 5].includes(pieceType)) {
+        if ([27, 28, 35, 36].includes(square)) {
+          value += 20;
+        }
       }
 
       score += this.isWhite(piece) ? value : -value;
     }
 
     return this.historyCount % 2 === 0 ? score : -score;
+  }
+
+  countNearbyDefenders(square, piece) {
+    const offsets = this.kingOffsets;
+    let defenders = 0;
+    for (const offset of offsets) {
+      const dest = square + offset;
+      if (
+        this.isValidSquare(dest) &&
+        this.board[dest] &&
+        this.isWhite(this.board[dest]) === this.isWhite(piece)
+      ) {
+        defenders++;
+      }
+    }
+    return defenders;
+  }
+
+  evaluatePawnStructure(square, piece) {
+    const direction = this.isWhite(piece) ? -8 : 8;
+    const left = square + direction - 1;
+    const right = square + direction + 1;
+    let value = 0;
+
+    if (this.isValidSquare(left) && this.board[left] === piece) {
+      value += 25; // Increased connected pawn bonus
+    }
+    if (this.isValidSquare(right) && this.board[right] === piece) {
+      value += 25; // Increased connected pawn bonus
+    }
+    if (!this.isValidSquare(left) && !this.isValidSquare(right)) {
+      value -= 20; // Increased isolated pawn penalty
+    }
+    return value;
   }
 
   search(depth, alpha, beta) {
@@ -108,7 +159,7 @@ class MinimalChessEngine {
     const moves = Array.from(this.generateMoves()).sort((a, b) => {
       const { to: toA } = this.decodeMove(a);
       const { to: toB } = this.decodeMove(b);
-      return (this.board[toB] || 0) - (this.board[toA] || 0); // Prioritize captures
+      return (this.board[toB] || 0) - (this.board[toA] || 0); // Prioritize captures and checks
     });
     if (moves.length === 0) return -20000; // Checkmate
 
@@ -133,12 +184,12 @@ class MinimalChessEngine {
     const moves = Array.from(this.generateMoves()).sort((a, b) => {
       const { to: toA } = this.decodeMove(a);
       const { to: toB } = this.decodeMove(b);
-      return (this.board[toB] || 0) - (this.board[toA] || 0); // Prioritize captures
+      return (this.board[toB] || 0) - (this.board[toA] || 0); // Prioritize captures, checks, and threats
     });
 
     for (const move of moves) {
       this.makeMove(move);
-      const score = -this.search(3, -Infinity, Infinity); // Reduced depth for lower memory usage
+      const score = -this.search(5, -Infinity, Infinity); // Increased depth for better evaluation
       this.unmakeMove();
 
       if (score > bestScore) {
