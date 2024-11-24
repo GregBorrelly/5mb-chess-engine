@@ -1,0 +1,10 @@
+[Event "Self-Play Analysis"]
+[Site "?"]
+[Date "2024.11.24"]
+[Round "?"]
+[White "ChessEngine (White)"]
+[Black "ChessEngine (Black)"]
+[Result "1-0"]
+
+1. e3 Nf6 2. Qf3 d5 3. Nc3 Nc6 4. Bb5 Nd7 5. Bxc6 bxc6 6. d4 Rg8 7. Qh5 Rh8 8. Nge2 Ba6 9. Nf4 Qb8 10. a3 Nb6 11. b3 Nc8 12. Bb2 Bb7 13. Qe2 e5 14. dxe5 Ke7 15. Qh5 Nb6 16. e6 fxe6 17. Ng6+ hxg6 18. Qxh8 Qc8 19. Qh4+ Ke8 20. Qg5 Kd7 21. Qxg6 Qb8 22. Qf7+ Kd6 23. Rd1 Nd7 24. Ne4# 1-0
+
