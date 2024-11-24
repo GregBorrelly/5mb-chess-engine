@@ -1,8 +1,7 @@
 class MinimalChessEngine {
   constructor() {
-    // Board representation
-    this.board = new Int8Array(64);
-    this.moveHistory = new Int32Array(512);
+    this.board = new Uint8Array(64); // Changed from Int8Array for reduced memory use
+    this.moveHistory = new Uint16Array(512); // Reduced size to save memory
     this.historyCount = 0;
 
     // Movement patterns
@@ -11,8 +10,8 @@ class MinimalChessEngine {
     this.bishopOffsets = [-9, -7, 7, 9];
     this.rookOffsets = [-8, -1, 1, 8];
 
-    // Enhanced piece values
-    this.pieceValues = new Int16Array([0, 100, 320, 330, 500, 900, 20000]);
+    // Simplified piece values for memory efficiency
+    this.pieceValues = [0, 100, 300, 300, 500, 900, 20000];
 
     // Piece-square tables for improved positional play
     this.pawnTable = new Int8Array([
@@ -31,8 +30,8 @@ class MinimalChessEngine {
   setupInitialPosition() {
     this.board.fill(0);
     for (let i = 0; i < 8; i++) {
-      this.board[8 + i] = 1;
-      this.board[48 + i] = 9;
+      this.board[8 + i] = 1; // Pawn
+      this.board[48 + i] = 9; // Pawn
     }
     const backRank = [4, 2, 3, 5, 6, 3, 2, 4];
     for (let i = 0; i < 8; i++) {
@@ -45,9 +44,11 @@ class MinimalChessEngine {
   isWhite(piece) {
     return piece >= 8;
   }
+
   getPieceType(piece) {
     return piece & 7;
   }
+
   isValidSquare(square) {
     return square >= 0 && square < 64;
   }
@@ -64,254 +65,86 @@ class MinimalChessEngine {
     const move = this.moveHistory[--this.historyCount];
     const from = move & 0x3f;
     const to = (move >> 6) & 0x3f;
-    const captured = move >> 12;
+    const captured = (move >> 12) & 0xf;
     this.board[from] = this.board[to];
     this.board[to] = captured;
   }
 
   evaluate() {
     let score = 0;
-    let endgame = this.isEndgame();
 
     for (let square = 0; square < 64; square++) {
       const piece = this.board[square];
       if (!piece) continue;
 
       const pieceType = this.getPieceType(piece);
-      const isWhitePiece = this.isWhite(piece);
       let value = this.pieceValues[pieceType];
 
       // Position value based on piece-square tables
-      const rank = Math.floor(square / 8);
-      const file = square % 8;
-
-      // Pawn structure evaluation
       if (pieceType === 1) {
-        value += isWhitePiece
+        value += this.isWhite(piece)
           ? this.pawnTable[square]
           : this.pawnTable[63 - square];
-
-        // Doubled pawns penalty
-        let doubledPawns = 0;
-        for (let r = 0; r < 8; r++) {
-          if (this.board[file + r * 8] === piece) doubledPawns++;
-        }
-        if (doubledPawns > 1) value -= 20;
       }
 
-      // Mobility bonus
-      if (pieceType > 1) {
-        const mobility = Array.from(this.generateMoves()).length;
-        value += mobility * 2;
-      }
-
-      score += isWhitePiece ? value : -value;
+      score += this.isWhite(piece) ? value : -value;
     }
 
     return this.historyCount % 2 === 0 ? score : -score;
   }
 
-  isEndgame() {
-    let queens = 0;
-    let minors = 0;
-    for (let square = 0; square < 64; square++) {
-      const piece = this.getPieceType(this.board[square]);
-      if (piece === 5) queens++;
-      if (piece === 2 || piece === 3) minors++;
-    }
-    return queens === 0 || (queens === 2 && minors <= 2);
-  }
-
   search(depth, alpha, beta) {
-    // Transposition table lookup
-    const ttEntry = this.transpositionTable.get(this.zobristHash());
-    if (ttEntry && ttEntry.depth >= depth) {
-      return ttEntry.score;
-    }
-
     if (depth === 0) {
-      return this.quiescenceSearch(alpha, beta);
+      return this.evaluate();
     }
 
     const moves = Array.from(this.generateMoves());
-    if (moves.length === 0) return -20000;
-
-    // Move ordering
-    moves.sort((a, b) => this.getMoveScore(b) - this.getMoveScore(a));
+    if (moves.length === 0) return -20000; // Checkmate
 
     let bestScore = -Infinity;
+
     for (const move of moves) {
       this.makeMove(move);
       const score = -this.search(depth - 1, -beta, -alpha);
       this.unmakeMove();
 
-      if (score >= beta) {
-        return beta;
-      }
+      if (score >= beta) return beta;
       bestScore = Math.max(bestScore, score);
       alpha = Math.max(alpha, score);
     }
 
-    // Store position in transposition table
-    this.transpositionTable.set(this.zobristHash(), {
-      score: bestScore,
-      depth: depth,
-    });
-
     return bestScore;
   }
 
-  quiescenceSearch(alpha, beta) {
-    const standPat = this.evaluate();
-    if (standPat >= beta) return beta;
-    if (standPat > alpha) alpha = standPat;
+  getBestMove() {
+    let bestMove = null;
+    let bestScore = -Infinity;
+    const moves = Array.from(this.generateMoves());
 
-    const captures = Array.from(this.generateCaptures());
-    for (const move of captures) {
+    for (const move of moves) {
       this.makeMove(move);
-      const score = -this.quiescenceSearch(-beta, -alpha);
+      const score = -this.search(3, -Infinity, Infinity); // Fixed depth search
       this.unmakeMove();
 
-      if (score >= beta) return beta;
-      if (score > alpha) alpha = score;
-    }
-    return alpha;
-  }
-
-  *generateCaptures() {
-    for (const move of this.generateMoves()) {
-      const { to } = this.decodeMove(move);
-      if (this.board[to] !== 0) {
-        yield move;
-      }
-    }
-  }
-
-  getMoveScore(move) {
-    const { to, captured } = this.decodeMove(move);
-    let score = 0;
-
-    // Capture scoring
-    if (captured) {
-      score += 10 * this.pieceValues[this.getPieceType(captured)];
-    }
-
-    // Center control
-    const toRank = Math.floor(to / 8);
-    const toFile = to % 8;
-    if (toRank >= 3 && toRank <= 4 && toFile >= 3 && toFile <= 4) {
-      score += 30;
-    }
-
-    return score;
-  }
-
-  zobristHash() {
-    let hash = 0;
-    for (let i = 0; i < 64; i++) {
-      if (this.board[i]) {
-        hash ^= (this.board[i] * 31 + i) * 7937;
-      }
-    }
-    return hash;
-  }
-
-  *generatePawnMoves(square) {
-    const piece = this.board[square];
-    const isWhite = this.isWhite(piece);
-    const direction = isWhite ? -8 : 8;
-    const startRank = isWhite ? 6 : 1;
-    const rank = Math.floor(square / 8);
-    const file = square % 8;
-
-    // Forward move
-    let dest = square + direction;
-    if (this.isValidSquare(dest) && !this.board[dest]) {
-      yield this.encodeMove(square, dest);
-
-      // Double move from start
-      if (rank === startRank) {
-        dest = square + 2 * direction;
-        if (!this.board[dest]) {
-          yield this.encodeMove(square, dest);
-        }
+      if (score > bestScore) {
+        bestScore = score;
+        bestMove = move;
       }
     }
 
-    // Captures
-    for (const offset of [direction - 1, direction + 1]) {
-      dest = square + offset;
-      if (!this.isValidSquare(dest)) continue;
-      if (Math.abs((dest % 8) - file) !== 1) continue;
-
-      const target = this.board[dest];
-      if (target && this.isWhite(target) !== isWhite) {
-        yield this.encodeMove(square, dest);
-      }
-    }
+    return bestMove;
   }
 
-  *generateKnightMoves(square) {
-    const piece = this.board[square];
-    const isWhite = this.isWhite(piece);
-
-    for (const offset of this.knightOffsets) {
-      const dest = square + offset;
-      if (!this.isValidSquare(dest)) continue;
-
-      // Verify L-shape
-      const srcRank = Math.floor(square / 8);
-      const srcFile = square % 8;
-      const destRank = Math.floor(dest / 8);
-      const destFile = dest % 8;
-
-      if (Math.abs(destRank - srcRank) + Math.abs(destFile - srcFile) !== 3)
-        continue;
-      if (
-        Math.abs(destRank - srcRank) === 0 ||
-        Math.abs(destFile - srcFile) === 0
-      )
-        continue;
-
-      const target = this.board[dest];
-      if (!target || this.isWhite(target) !== isWhite) {
-        yield this.encodeMove(square, dest);
-      }
-    }
+  encodeMove(from, to) {
+    return from | (to << 6);
   }
 
-  *generateSlidingMoves(square, directions) {
-    const piece = this.board[square];
-    const isWhite = this.isWhite(piece);
-
-    for (const dir of directions) {
-      let dest = square + dir;
-
-      while (this.isValidSquare(dest)) {
-        // Check if move wraps around the board
-        const srcRank = Math.floor(square / 8);
-        const srcFile = square % 8;
-        const destRank = Math.floor(dest / 8);
-        const destFile = dest % 8;
-
-        if (
-          Math.abs(destRank - srcRank) > 7 ||
-          Math.abs(destFile - srcFile) > 7
-        )
-          break;
-
-        const target = this.board[dest];
-        if (!target) {
-          yield this.encodeMove(square, dest);
-        } else {
-          if (this.isWhite(target) !== isWhite) {
-            yield this.encodeMove(square, dest);
-          }
-          break;
-        }
-        dest += dir;
-      }
-    }
+  decodeMove(move) {
+    return {
+      from: move & 0x3f,
+      to: (move >> 6) & 0x3f,
+      captured: (move >> 12) & 0xf,
+    };
   }
 
   *generateMoves() {
@@ -347,98 +180,75 @@ class MinimalChessEngine {
     }
   }
 
-  evaluate() {
-    let score = 0;
+  *generatePawnMoves(square) {
+    const piece = this.board[square];
+    const isWhite = this.isWhite(piece);
+    const direction = isWhite ? -8 : 8;
+    const startRank = isWhite ? 6 : 1;
+    const rank = Math.floor(square / 8);
 
-    for (let square = 0; square < 64; square++) {
-      const piece = this.board[square];
-      if (!piece) continue;
+    // Forward move
+    let dest = square + direction;
+    if (this.isValidSquare(dest) && !this.board[dest]) {
+      yield this.encodeMove(square, dest);
 
-      // Material value
-      const pieceType = this.getPieceType(piece);
-      let value = this.pieceValues[pieceType];
-
-      // Position value
-      const rank = Math.floor(square / 8);
-      const file = square % 8;
-
-      // Center control
-      if (rank >= 3 && rank <= 4 && file >= 3 && file <= 4) {
-        value += 20;
-      }
-
-      // Pawn structure
-      if (pieceType === 1) {
-        value += (this.isWhite(piece) ? 6 - rank : rank - 1) * 5; // Fixed here
-      }
-
-      score += this.isWhite(piece) ? value : -value;
-    }
-
-    return this.historyCount % 2 === 0 ? score : -score;
-  }
-
-  search(depth, alpha, beta) {
-    if (depth === 0) {
-      return this.evaluate();
-    }
-
-    const moves = Array.from(this.generateMoves());
-    if (moves.length === 0) return -20000; // Checkmate
-
-    let bestScore = -Infinity;
-
-    for (const move of moves) {
-      this.makeMove(move);
-      const score = -this.search(depth - 1, -beta, -alpha);
-      this.unmakeMove();
-
-      if (score >= beta) return beta;
-      bestScore = Math.max(bestScore, score);
-      alpha = Math.max(alpha, score);
-    }
-
-    return bestScore;
-  }
-
-  getBestMove() {
-    const startTime = Date.now();
-    let bestMove = null;
-    let bestScore = -Infinity;
-
-    // Iterative deepening
-    for (let depth = 1; depth <= 6; depth++) {
-      if (Date.now() - startTime > 9800) break;
-
-      for (const move of this.generateMoves()) {
-        this.makeMove(move);
-        const score = -this.search(depth - 1, -Infinity, Infinity);
-        this.unmakeMove();
-
-        if (score > bestScore) {
-          bestScore = score;
-          bestMove = move;
+      // Double move from start
+      if (rank === startRank) {
+        dest = square + 2 * direction;
+        if (!this.board[dest]) {
+          yield this.encodeMove(square, dest);
         }
       }
-
-      console.log(
-        `Depth ${depth} complete - best: ${this.moveToString(bestMove)}`
-      );
     }
 
-    return bestMove;
+    // Captures
+    for (const offset of [direction - 1, direction + 1]) {
+      dest = square + offset;
+      if (!this.isValidSquare(dest)) continue;
+      if (Math.abs((dest % 8) - (square % 8)) !== 1) continue;
+
+      const target = this.board[dest];
+      if (target && this.isWhite(target) !== isWhite) {
+        yield this.encodeMove(square, dest);
+      }
+    }
   }
 
-  encodeMove(from, to) {
-    return from | (to << 6) | (this.board[to] << 12);
+  *generateKnightMoves(square) {
+    const piece = this.board[square];
+    const isWhite = this.isWhite(piece);
+
+    for (const offset of this.knightOffsets) {
+      const dest = square + offset;
+      if (!this.isValidSquare(dest)) continue;
+
+      const target = this.board[dest];
+      if (!target || this.isWhite(target) !== isWhite) {
+        yield this.encodeMove(square, dest);
+      }
+    }
   }
 
-  decodeMove(move) {
-    return {
-      from: move & 0x3f,
-      to: (move >> 6) & 0x3f,
-      captured: move >> 12,
-    };
+  *generateSlidingMoves(square, directions) {
+    const piece = this.board[square];
+    const isWhite = this.isWhite(piece);
+
+    for (const dir of directions) {
+      let dest = square + dir;
+
+      while (this.isValidSquare(dest)) {
+        const target = this.board[dest];
+        if (!target) {
+          yield this.encodeMove(square, dest);
+        } else {
+          if (this.isWhite(target) !== isWhite) {
+            yield this.encodeMove(square, dest);
+          }
+          break;
+        }
+        dest += dir;
+      }
+    }
   }
 
   moveToString(move) {
