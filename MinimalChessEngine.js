@@ -1,7 +1,7 @@
 class MinimalChessEngine {
   constructor() {
     this.board = new Uint8Array(64); // Changed from Int8Array for reduced memory use
-    this.moveHistory = new Uint16Array(512); // Reduced size to save memory
+    this.moveHistory = new Uint16Array(256); // Further reduced size to save memory
     this.historyCount = 0;
 
     // Movement patterns
@@ -11,7 +11,7 @@ class MinimalChessEngine {
     this.rookOffsets = [-8, -1, 1, 8];
 
     // Simplified piece values for memory efficiency
-    this.pieceValues = [0, 100, 300, 300, 500, 900, 20000];
+    this.pieceValues = [0, 100, 320, 330, 500, 900, 20000];
 
     // Piece-square tables for improved positional play
     this.pawnTable = new Int8Array([
@@ -87,6 +87,13 @@ class MinimalChessEngine {
           : this.pawnTable[63 - square];
       }
 
+      // Add positional value for piece activity and king safety
+      if (pieceType === 6) {
+        value += this.isWhite(piece)
+          ? -Math.abs(4 - (square % 8))
+          : -Math.abs(4 - (square % 8));
+      }
+
       score += this.isWhite(piece) ? value : -value;
     }
 
@@ -98,7 +105,11 @@ class MinimalChessEngine {
       return this.evaluate();
     }
 
-    const moves = Array.from(this.generateMoves());
+    const moves = Array.from(this.generateMoves()).sort((a, b) => {
+      const { to: toA } = this.decodeMove(a);
+      const { to: toB } = this.decodeMove(b);
+      return (this.board[toB] || 0) - (this.board[toA] || 0); // Prioritize captures
+    });
     if (moves.length === 0) return -20000; // Checkmate
 
     let bestScore = -Infinity;
@@ -119,11 +130,15 @@ class MinimalChessEngine {
   getBestMove() {
     let bestMove = null;
     let bestScore = -Infinity;
-    const moves = Array.from(this.generateMoves());
+    const moves = Array.from(this.generateMoves()).sort((a, b) => {
+      const { to: toA } = this.decodeMove(a);
+      const { to: toB } = this.decodeMove(b);
+      return (this.board[toB] || 0) - (this.board[toA] || 0); // Prioritize captures
+    });
 
     for (const move of moves) {
       this.makeMove(move);
-      const score = -this.search(3, -Infinity, Infinity); // Fixed depth search
+      const score = -this.search(3, -Infinity, Infinity); // Reduced depth for lower memory usage
       this.unmakeMove();
 
       if (score > bestScore) {
@@ -174,7 +189,7 @@ class MinimalChessEngine {
           ]);
           break;
         case 6: // King
-          yield* this.generateSlidingMoves(square, this.kingOffsets);
+          yield* this.generateKingMoves(square);
           break;
       }
     }
@@ -247,6 +262,21 @@ class MinimalChessEngine {
           break;
         }
         dest += dir;
+      }
+    }
+  }
+
+  *generateKingMoves(square) {
+    const piece = this.board[square];
+    const isWhite = this.isWhite(piece);
+
+    for (const offset of this.kingOffsets) {
+      const dest = square + offset;
+      if (!this.isValidSquare(dest)) continue;
+
+      const target = this.board[dest];
+      if (!target || this.isWhite(target) !== isWhite) {
+        yield this.encodeMove(square, dest);
       }
     }
   }
