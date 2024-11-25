@@ -1,0 +1,8 @@
+[Event "Self-play game"]
+[Date "2024-11-24"]
+[White "MinimalEngine"]
+[Black "MinimalEngine"]
+[Result "*"]
+
+1. c2c4 d7d6 2. d2d4 c7c5 3. e2e3 c5d4 4. d1h6 d8d1 5. h6b7 b8a6 6. b7a6 c8b7 7. a6b7 g8a6 8. e3e4 d4d3 9. b7c8 a6c5 10. c1f4 a8c8 11. b1h3 d1c2 12. e1d2 f7f5 13. d2c2 e7e5 14. f4g5 c8a8 15. c2d3 f8e7 16. g5b7 c5b7 17. d3e3 a8c8 18. h3f4 c8c6 19. a1b1 a7a6 20. g1h3 b7d8 21. b1e1 h8b7 22. h3a4 g7g5 23. a4h3 h7h6 24. e3d2 d8e6 25. f4d5 e8d7
+*

@@ -1,4 +1,3 @@
-// test.js
 const { MinimalChessEngine } = require("./MinimalChessEngine");
 
 class ChessDisplay {
@@ -20,7 +19,7 @@ class ChessDisplay {
     };
 
     console.log("\n     a  b  c  d  e  f  g  h");
-    console.log("   ┌─────────────────────────┐");
+    console.log("   ┌──────────────────────────┐");
     for (let rank = 0; rank < 8; rank++) {
       process.stdout.write(` ${8 - rank} │`);
       for (let file = 0; file < 8; file++) {
@@ -28,9 +27,9 @@ class ChessDisplay {
         const piece = board[square];
         process.stdout.write(` ${pieces[piece] || "."} `);
       }
-      console.log("│");
+      console.log("|");
     }
-    console.log("   └─────────────────────────┘");
+    console.log("   └──────────────────────────┘");
   }
 
   static formatMove(moveNum, move, isWhite) {
@@ -64,7 +63,7 @@ class GameAnalyzer {
     while (moveCount < maxMoves) {
       const startTime = Date.now();
 
-      // Find and make best move
+      // Find and make best move, using opening book if applicable
       const move = engine.getBestMove();
       if (!move) break;
 
@@ -97,6 +96,11 @@ class GameAnalyzer {
       console.log(`Evaluation: ${(evaluation / 100).toFixed(2)}`);
       console.log(`Time: ${elapsed.toFixed(2)}s`);
       ChessDisplay.printBoard(engine.board);
+
+      // Check if the move is from the opening book
+      if (elapsed < 1) {
+        console.log("Move taken from opening book");
+      }
 
       this.takeMemorySnapshot();
 
